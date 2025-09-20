@@ -1,79 +1,100 @@
-from fastapi import FastAPI
-from fastapi import Request
-from fastapi.responses import RedirectResponse, JSONResponse
-import os, uuid, base64, requests, urllib.parse
-from pydantic import BaseModel
-# eBay OAuth configuration
-EBAY_CLIENT_ID = os.getenv("EBAY_CLIENT_ID")
-EBAY_CLIENT_SECRET = os.getenv("EBAY_CLIENT_SECRET")
-EBAY_RUNAME = os.getenv("EBAY_RUNAME")
+# ---------- YABE eBay PROXY SECTION (safe to paste as-is) ----------
+# Requires: `requests` in requirements.txt (already added)
 
+from fastapi import APIRouter, Request, Response
+from fastapi.responses import JSONResponse
+import requests
 
-app = FastAPI(title="PackFit", version="0.1.0")
+EBAY_API = "https://api.ebay.com"
+router = APIRouter()
 
-# --- Health check route ---
-@app.get("/ping")
-def ping():
-    return {"message": "pong"}
+def _forward_headers(req: Request) -> dict:
+    h = {"Accept": "application/json"}
+    auth = req.headers.get("authorization")
+    if auth:
+        h["Authorization"] = auth
+    ctype = req.headers.get("content-type")
+    if ctype:
+        h["Content-Type"] = ctype
+    return h
 
-# --- Placeholder PackFit route ---
-class PackFitRequest(BaseModel):
-    itemType: str
-    sizeLabel: str = "M"
-    weightOz: float = 0
+async def _proxy(req: Request, method: str, ebay_path: str, inject_headers: dict | None = None) -> Response:
+    url = f"{EBAY_API}{ebay_path}"
+    params = dict(req.query_params)
+    body = await req.body()
+    headers = _forward_headers(req)
+    if inject_headers:
+        headers.update(inject_headers)
 
-@app.post("/packfit/estimate")
-def estimate_packfit(request: PackFitRequest):
-    # right now, it just echoes back what you send
-    return {
-        "chosenPackage": "Poly 10x13",
-        "inputs": request.dict(),
-        "note": "This is a stub — proves routing works!"
-    }
+    r = requests.request(method, url, params=params, data=body if body else None, headers=headers, timeout=30)
+    mt = r.headers.get("content-type", "application/json")
+    return Response(content=r.content, status_code=r.status_code, media_type=mt)
 
+# ---------- Inventory ----------
+@router.get("/sell/inventory/v1/inventory_item/{sku}")
+async def proxy_get_inventory_item(sku: str, request: Request):
+    return await _proxy(request, "GET", f"/sell/inventory/v1/inventory_item/{sku}")
 
-@app.get("/ebay/login")
-def ebay_login():
-    """Redirect user to eBay’s OAuth authorization page."""
-    state = str(uuid.uuid4())
-    scopes = [
-        "https://api.ebay.com/oauth/api_scope/sell.inventory",
-        "https://api.ebay.com/oauth/api_scope/sell.account",
-        "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
-    ]
-    params = {
-        "client_id": EBAY_CLIENT_ID,
-        "redirect_uri": EBAY_RUNAME,
-        "response_type": "code",
-        "state": state,
-        "scope": " ".join(scopes),
-    }
-    auth_url = "https://auth.ebay.com/oauth2/authorize?" + urllib.parse.urlencode(params)
-    response = RedirectResponse(auth_url)
-    response.set_cookie(key="ebay_oauth_state", value=state, httponly=True, samesite="lax")
-    return response
-
-@app.get("/ebay/callback")
-def ebay_callback(request: Request, code: str = "", state: str = ""):
-    """Handle eBay OAuth callback, exchange code for access + refresh tokens."""
-    saved_state = request.cookies.get("ebay_oauth_state")
-    if not saved_state or state != saved_state:
-        return JSONResponse({"error": "invalid_state"}, status_code=400)
-    basic_token = base64.b64encode(f"{EBAY_CLIENT_ID}:{EBAY_CLIENT_SECRET}".encode()).decode()
-    headers = {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Authorization": f"Basic {basic_token}",
-    }
-    data = {
-        "grant_type": "authorization_code",
-        "code": code,
-        "redirect_uri": EBAY_RUNAME,
-    }
-    token_res = requests.post(
-        "https://api.ebay.com/identity/v1/oauth2/token",
-        headers=headers,
-        data=data,
+@router.put("/sell/inventory/v1/inventory_item/{sku}")
+async def proxy_put_inventory_item(sku: str, request: Request, contentLanguage: str = "en-US"):
+    return await _proxy(
+        request, "PUT", f"/sell/inventory/v1/inventory_item/{sku}",
+        inject_headers={"Content-Language": contentLanguage}
     )
-    if not token_res.ok:
-        return JSONResponse({"error": f"token_exchange_failed: {token_res.status_code}", "details": token_res.text}, status_code=500)
-    return JSONResponse(token_res.json())
+
+# ---------- Offers ----------
+@router.post("/sell/inventory/v1/offer")
+async def proxy_post_offer(request: Request, contentLanguage: str = "en-US"):
+    return await _proxy(
+        request, "POST", "/sell/inventory/v1/offer",
+        inject_headers={"Content-Language": contentLanguage}
+    )
+
+@router.get("/sell/inventory/v1/offer/{offerId}")
+async def proxy_get_offer(offerId: str, request: Request):
+    return await _proxy(request, "GET", f"/sell/inventory/v1/offer/{offerId}")
+
+@router.put("/sell/inventory/v1/offer/{offerId}")
+async def proxy_put_offer(offerId: str, request: Request, contentLanguage: str = "en-US"):
+    return await _proxy(
+        request, "PUT", f"/sell/inventory/v1/offer/{offerId}",
+        inject_headers={"Content-Language": contentLanguage}
+    )
+
+@router.post("/sell/inventory/v1/offer/{offerId}/publish")
+async def proxy_publish_offer(offerId: str, request: Request):
+    return await _proxy(request, "POST", f"/sell/inventory/v1/offer/{offerId}/publish")
+
+# ---------- Account policies ----------
+@router.get("/sell/account/v2/payment_policy")
+async def proxy_list_payment_policies(request: Request):
+    return await _proxy(request, "GET", "/sell/account/v2/payment_policy")
+
+@router.get("/sell/account/v2/return_policy")
+async def proxy_list_return_policies(request: Request):
+    return await _proxy(request, "GET", "/sell/account/v2/return_policy")
+
+@router.get("/sell/account/v2/fulfillment_policy")
+async def proxy_list_fulfillment_policies(request: Request):
+    return await _proxy(request, "GET", "/sell/account/v2/fulfillment_policy")
+
+# ---------- Fulfillment (orders) ----------
+@router.get("/sell/fulfillment/v1/order")
+async def proxy_search_orders(request: Request):
+    return await _proxy(request, "GET", "/sell/fulfillment/v1/order")
+
+# ---------- Browse (comps) ----------
+@router.get("/browse/search")
+async def proxy_browse_search(request: Request, q: str, limit: int = 10, fieldgroups: str | None = None):
+    # Builder can't send the header; we inject it here
+    inject = {"X-EBAY-C-MARKETPLACE-ID": "EBAY_US"}
+    return await _proxy(request, "GET", "/buy/browse/v1/item_summary/search", inject_headers=inject)
+
+# --- register router without disturbing your existing app/routes ---
+try:
+    app.include_router(router)  # if `app` already exists in your file
+except NameError:
+    from fastapi import FastAPI
+    app = FastAPI()
+    app.include_router(router)
+# ---------- END PROXY SECTION ----------
