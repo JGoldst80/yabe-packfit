@@ -1,0 +1,21 @@
+{
+  "schema_version": "v1",
+  "name_for_human": "YABE Seller Agent",
+  "name_for_model": "yabe",
+  "description_for_human": "Manage inventory, offers, orders and browse comps on eBay.",
+  "description_for_model": "Interact with the user’s eBay seller account via Sell APIs and search comps via the Buy API.",
+  "auth": {
+    "type": "oauth",
+    "authorization_url": "https://auth.ebay.com/oauth2/authorize",
+    "token_url": "https://api.ebay.com/identity/v1/oauth2/token",
+    "scopes": "https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.account https://api.ebay.com/oauth/api_scope/sell.fulfillment https://api.ebay.com/oauth/api_scope/buy.browse",
+    "authorization_content_type": "application/x-www-form-urlencoded"
+  },
+  "api": {
+    "type": "openapi",
+    "url": "https://your-app.vercel.app/openapi.yaml"
+  },
+  "logo_url": "https://your-app.vercel.app/logo.png",
+  "contact_email": "you@example.com",
+  "legal_info_url": "https://your-app.vercel.app/legal"
+}
