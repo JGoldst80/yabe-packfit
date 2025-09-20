@@ -1,0 +1,407 @@
+openapi: 3.1.0
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+
+info:
+  title: YABE — eBay Seller Agent
+  version: 1.0.0
+  description: >
+    Minimal Sell/Buy surfaces for inventory, offers, account policies, fulfillment,
+    and comps. Scopes and endpoints align with eBay's public APIs.
+
+servers:
+  - url: https://api.ebay.com
+
+tags:
+  - name: Inventory
+  - name: Offers
+  - name: Account
+  - name: Fulfillment
+  - name: Browse
+
+components:
+  securitySchemes:
+    ebayUserOAuth:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://auth.ebay.com/oauth2/authorize
+          tokenUrl: https://api.ebay.com/identity/v1/oauth2/token
+          scopes:
+            'https://api.ebay.com/oauth/api_scope/sell.inventory': Inventory & Offers
+            'https://api.ebay.com/oauth/api_scope/sell.account': Business policies & rate tables
+            'https://api.ebay.com/oauth/api_scope/sell.fulfillment': Orders & fulfillments
+    ebayAppOAuth:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://api.ebay.com/identity/v1/oauth2/token
+          scopes:
+            'https://api.ebay.com/oauth/api_scope': Default app scope
+            'https://api.ebay.com/oauth/api_scope/buy.browse': Browse (comps)
+
+  parameters:
+    ContentLanguage:
+      in: header
+      name: Content-Language
+      required: true
+      schema:
+        type: string
+        default: en-US
+    MarketplaceHeader:
+      in: header
+      name: X-EBAY-C-MARKETPLACE-ID
+      required: true
+      schema:
+        type: string
+        default: EBAY_US
+    SkuParam:
+      in: path
+      name: sku
+      required: true
+      schema:
+        type: string
+    OfferIdParam:
+      in: path
+      name: offerId
+      required: true
+      schema:
+        type: string
+
+  schemas:
+    InventoryItem:
+      type: object
+      description: Minimal inventory item for Sell Inventory API.
+      additionalProperties: true
+      properties:
+        availability:
+          type: object
+          additionalProperties: true
+          properties:
+            shipToLocationAvailability:
+              type: object
+              additionalProperties: true
+              properties:
+                quantity:
+                  type: integer
+                  minimum: 0
+        condition:
+          type: string
+          description: e.g., NEW, USED, LIKE_NEW
+        product:
+          type: object
+          additionalProperties: true
+          properties:
+            title:
+              type: string
+            description:
+              type: string
+            imageUrls:
+              type: array
+              items:
+                type: string
+                format: uri
+    OfferDraftRequest:
+      type: object
+      required:
+        - sku
+        - marketplaceId
+        - format
+      properties:
+        sku:
+          type: string
+        marketplaceId:
+          type: string
+          example: EBAY_US
+        format:
+          type: string
+          enum:
+            - FIXED_PRICE
+            - AUCTION
+        availableQuantity:
+          type: integer
+          minimum: 0
+        pricingSummary:
+          type: object
+          properties:
+            price:
+              type: object
+              properties:
+                value:
+                  type: number
+                currency:
+                  type: string
+    OfferUpdateRequest:
+      type: object
+      description: Update fields such as price, quantity, category, and policy IDs.
+      additionalProperties: true
+      properties:
+        pricingSummary:
+          type: object
+          additionalProperties: true
+        availableQuantity:
+          type: integer
+        categoryId:
+          type: string
+        listingPolicies:
+          type: object
+          properties:
+            paymentPolicyId:
+              type: string
+            returnPolicyId:
+              type: string
+            fulfillmentPolicyId:
+              type: string
+    PublishResponse:
+      type: object
+      additionalProperties: true
+
+  responses:
+    Generic200:
+      description: OK
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+    Generic201:
+      description: Created
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+    NotFound:
+      description: Not Found
+    Conflict:
+      description: Conflict — quantity/policies/requirements not satisfied
+
+paths:
+
+  ########################################
+  # SELL INVENTORY — inventory items
+  ########################################
+
+  /sell/inventory/v1/inventory_item/{sku}:
+    get:
+      tags:
+        - Inventory
+      summary: Get inventory item by SKU
+      operationId: getInventoryItem
+      security:
+        - ebayUserOAuth: []
+      parameters:
+        - $ref: '#/components/parameters/SkuParam'
+      responses:
+        '200':
+          $ref: '#/components/responses/Generic200'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      tags:
+        - Inventory
+      summary: Create or replace inventory item (by SKU)
+      operationId: upsertInventoryItem
+      security:
+        - ebayUserOAuth: []
+      parameters:
+        - $ref: '#/components/parameters/SkuParam'
+        - $ref: '#/components/parameters/ContentLanguage'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InventoryItem'
+            examples:
+              minimal:
+                summary: Minimal item
+                value:
+                  availability:
+                    shipToLocationAvailability:
+                      quantity: 1
+                  condition: NEW
+                  product:
+                    title: Example Title
+                    description: Example description
+                    imageUrls:
+                      - https://example.com/image.jpg
+      responses:
+        '200':
+          $ref: '#/components/responses/Generic200'
+        '201':
+          $ref: '#/components/responses/Generic201'
+
+  ########################################
+  # SELL INVENTORY — offers (drafts & updates)
+  ########################################
+
+  /sell/inventory/v1/offer:
+    post:
+      tags:
+        - Offers
+      summary: Create an unpublished offer (draft)
+      operationId: createOffer
+      security:
+        - ebayUserOAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ContentLanguage'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OfferDraftRequest'
+      responses:
+        '201':
+          $ref: '#/components/responses/Generic201'
+
+  /sell/inventory/v1/offer/{offerId}:
+    get:
+      tags:
+        - Offers
+      summary: Get an offer by ID
+      operationId: getOffer
+      security:
+        - ebayUserOAuth: []
+      parameters:
+        - $ref: '#/components/parameters/OfferIdParam'
+      responses:
+        '200':
+          $ref: '#/components/responses/Generic200'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      tags:
+        - Offers
+      summary: Update an offer (price, quantity, category, policy IDs, etc.)
+      operationId: updateOffer
+      security:
+        - ebayUserOAuth: []
+      parameters:
+        - $ref: '#/components/parameters/OfferIdParam'
+        - $ref: '#/components/parameters/ContentLanguage'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OfferUpdateRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/Generic200'
+
+  /sell/inventory/v1/offer/{offerId}/publish:
+    post:
+      tags:
+        - Offers
+      summary: Publish an offer (make the listing live)
+      operationId: publishOffer
+      security:
+        - ebayUserOAuth: []
+      parameters:
+        - $ref: '#/components/parameters/OfferIdParam'
+      responses:
+        '200':
+          $ref: '#/components/responses/Generic200'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  ########################################
+  # SELL ACCOUNT — policies
+  ########################################
+
+  /sell/account/v2/payment_policy:
+    get:
+      tags:
+        - Account
+      summary: List payment policies
+      operationId: listPaymentPolicies
+      security:
+        - ebayUserOAuth: []
+      responses:
+        '200':
+          $ref: '#/components/responses/Generic200'
+
+  /sell/account/v2/return_policy:
+    get:
+      tags:
+        - Account
+      summary: List return policies
+      operationId: listReturnPolicies
+      security:
+        - ebayUserOAuth: []
+      responses:
+        '200':
+          $ref: '#/components/responses/Generic200'
+
+  /sell/account/v2/fulfillment_policy:
+    get:
+      tags:
+        - Account
+      summary: List fulfillment policies
+      operationId: listFulfillmentPolicies
+      security:
+        - ebayUserOAuth: []
+      responses:
+        '200':
+          $ref: '#/components/responses/Generic200'
+
+  ########################################
+  # SELL FULFILLMENT — orders
+  ########################################
+
+  /sell/fulfillment/v1/order:
+    get:
+      tags:
+        - Fulfillment
+      summary: Search orders
+      operationId: searchOrders
+      security:
+        - ebayUserOAuth: []
+      parameters:
+        - in: query
+          name: filter
+          schema:
+            type: string
+            example: creationdate:[2025-09-01T00:00:00.000Z..2025-09-20T00:00:00.000Z]
+      responses:
+        '200':
+          $ref: '#/components/responses/Generic200'
+
+  ########################################
+  # BUY BROWSE — comps (with images)
+  ########################################
+
+  /buy/browse/v1/item_summary/search:
+    get:
+      tags:
+        - Browse
+      summary: Comps — search eBay listings
+      operationId: searchItemSummary
+      security:
+        - ebayAppOAuth: []
+      parameters:
+        - $ref: '#/components/parameters/MarketplaceHeader'
+        - in: query
+          name: q
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 200
+        - in: query
+          name: fieldgroups
+          schema:
+            type: string
+            description: Request extended fields (e.g., additionalImages).
+            example: EXTENDED
+      responses:
+        '200':
+          $ref: '#/components/responses/Generic200'
