@@ -13,9 +13,9 @@
   },
   "api": {
     "type": "openapi",
-    "url": "https://your-app.vercel.app/openapi.yaml"
+    "url": "https://yabe-packfit.vercel.app/openapi.yaml"
   },
-  "logo_url": "https://your-app.vercel.app/logo.png",
-  "contact_email": "you@example.com",
-  "legal_info_url": "https://your-app.vercel.app/legal"
+  "logo_url": "https://yabe-packfit.vercel.app/logo.png",
+  "contact_email": "your.email@example.com",
+  "legal_info_url": "https://yabe-packfit.vercel.app/legal"
 }
